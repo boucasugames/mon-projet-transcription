@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await audioBlob.arrayBuffer());
     const file = new File([buffer], 'recording.webm', { type: 'audio/webm' });
 
-    // 1. Étape Whisper avec le lexique administratif marocain
+    // 1. Étape Whisper avec ancrage strict
     let whisperPrompt = `باسم جلالة الملك وطبقا للقانون، حكمت المحكمة علنيا ابتدائيا وحضوريا وبمثابة حضوري، في الشكل، بقبول الطعن، في الموضوع، بإلغاء القرار الصادر عن رئيس جماعة وجدة، برفض طلب الشركة الطاعنة، الرامي إلى تغيير طبيعة النشاط جزئيا، موضوع الرخصة رقم 1205، بتاريخ 06 يوليوز 2025، مع ترتيب الآثار القانونية على ذلك، ورفض باقي الطلبات، الصائر.`;
 
     const groqFormData = new FormData();
@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
     }
 
     const whisperData = await whisperRes.json();
-    const rawText = whisperData.text;
+    let rawText = whisperData.text;
 
-    // 2. Étape de correction phonétique stricte (Sans réécriture ni invention)
+    // 2. Correction phonétique stricte avec interdiction absolue d'ajouter des noms ou signatures
     const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -48,21 +48,20 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: 'system',
-            content: `أنت مدقق إملائي صوتي خاص بأحكام المحاكم المغربية. 
-مهمتك الوحيدة: تصحيح الأخطاء النطقية والإملائية البحتة التي يرتكبها برنامج النسخ الصوتي (مثل تحويل "قبور" إلى "قبول"، "الطعام" إلى "الطلبات"، "بفرض" إلى "برفض"، "اسمي" إلى "باسم").
+            content: `أنت مدقق إملائي صوتي دقيق جداً لأحكام المحاكم المغربية. 
+مهمتك: تصحيح الأخطاء النطقية فقط (مثل: "قبور" -> "قبول"، "الطعام" -> "الطلبات"، "الصادر" الخاطئة في نهاية الحكم إلى "الصائر").
 
 شروط صارمة جداً:
-1. لا تقم أبداً بإضافة أي كلمات أو جمل أو فقرات أو توقيعات لم تذكر في النص الأصلي.
-2. لا تقم بحذف أي كلمة ذكرها المستخدم.
-3. حافظ على نفس الكلمات ونفس الترتيب تماماً، فقط صحح الكلمات المكتوبة خطأً نتيجة التشابه الصوتي (الكلمات المعوجة إملائياً أو المصطلحات القضائية المشوهة).
-4. أرجع النص المصحح إملائياً فقط ودون أي مقدمات.`
+1. ممنوع منعاً باتاً إضافة أي توقيعات، أو أسماء أشخاص، أو عبارات خارجية (مثل أسماء مترجمين أو جهات غير موجودة في النص).
+2. لا تضف أي كلمات من عندك، حافظ على نص المستخدم بحذافيره بعد تصحيح أخطائه الإملائية والصوتية فقط.
+3. أعطِ النص المصحح مباشرة دون أي مقدمات أو إضافات.`
           },
           {
             role: 'user',
             content: rawText
           }
         ],
-        temperature: 0.05 // Température quasi-nulle pour interdire toute invention créative
+        temperature: 0.0
       }),
     });
 
@@ -72,7 +71,10 @@ export async function POST(req: NextRequest) {
     }
 
     const chatData = await chatRes.json();
-    const correctedText = chatData.choices[0].message.content;
+    let correctedText = chatData.choices[0].message.content;
+
+    // Sécurité supplémentaire : s'assurer qu'aucune "traduction" ou nom parasite n'apparaît à la fin
+    correctedText = correctedText.replace(/ترجمة.*$/gm, '').trim();
 
     return NextResponse.json({ text: correctedText });
 
