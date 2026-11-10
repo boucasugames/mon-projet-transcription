@@ -3,14 +3,16 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const audioFile = formData.get('file') as Blob;
+    const audioBlob = formData.get('file') as Blob;
     const legalTopic = (formData.get('topic') as string) || 'expropriation';
 
-    if (!audioFile) {
+    if (!audioBlob) {
       return NextResponse.json({ error: 'Fichier audio manquant' }, { status: 400 });
     }
 
-    // 1. Choix du prompt Whisper selon la matière juridique
+    const buffer = Buffer.from(await audioBlob.arrayBuffer());
+    const file = new File([buffer], 'recording.webm', { type: 'audio/webm' });
+
     let whisperPrompt = `حكم باسم جلالة الملك وطبقاً للقانون، المحكمة الإدارية، محكمة الاستئناف الإدارية، دعوى إلغاء القرار الإداري، المسؤولية الإدارية، مفوض الملك للدفاع عن القانون والحق.`;
     
     if (legalTopic === 'expropriation') {
@@ -18,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     const groqFormData = new FormData();
-    groqFormData.append('file', audioFile, 'recording.webm');
+    groqFormData.append('file', file);
     groqFormData.append('model', 'whisper-large-v3');
     groqFormData.append('language', 'ar');
     groqFormData.append('prompt', whisperPrompt);
@@ -31,13 +33,13 @@ export async function POST(req: NextRequest) {
 
     if (!whisperRes.ok) {
       const err = await whisperRes.json();
-      return NextResponse.json({ error: err.error?.message || 'Erreur Whisper' }, { status: whisperRes.status });
+      return NextResponse.json({ error: `Groq Whisper: ${err.error?.message}` }, { status: whisperRes.status });
     }
 
     const whisperData = await whisperRes.json();
     const rawText = whisperData.text;
 
-    // 2. Correction et structuration juridique via Llama 3.3 (température 0.0 pour un respect strict)
+    // Utilisation du modèle visible dans votre Playground
     const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -45,7 +47,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b', // <--- Modèle mis à jour selon votre capture
         messages: [
           {
             role: 'system',
@@ -59,17 +61,21 @@ export async function POST(req: NextRequest) {
             content: rawText
           }
         ],
-        temperature: 0.0
+        temperature: 0.1
       }),
     });
+
+    if (!chatRes.ok) {
+      const errChat = await chatRes.json();
+      return NextResponse.json({ error: `Groq AI: ${errChat.error?.message}` }, { status: chatRes.status });
+    }
 
     const chatData = await chatRes.json();
     const correctedText = chatData.choices[0].message.content;
 
     return NextResponse.json({ text: correctedText });
 
-  } catch (error) {
-    console.error('Erreur serveur:', error);
-    return NextResponse.json({ error: 'Erreur interne du serveur.' }, { status: 500 });
+  } catch (error: any) {
+    return NextResponse.json({ error: `Erreur serveur: ${error?.message}` }, { status: 500 });
   }
 }
