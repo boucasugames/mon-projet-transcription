@@ -1,0 +1,75 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+  try {
+    const formData = await req.formData();
+    const audioFile = formData.get('file') as Blob;
+    const legalTopic = (formData.get('topic') as string) || 'expropriation';
+
+    if (!audioFile) {
+      return NextResponse.json({ error: 'Fichier audio manquant' }, { status: 400 });
+    }
+
+    // 1. Choix du prompt Whisper selon la matière juridique
+    let whisperPrompt = `حكم باسم جلالة الملك وطبقاً للقانون، المحكمة الإدارية، محكمة الاستئناف الإدارية، دعوى إلغاء القرار الإداري، المسؤولية الإدارية، مفوض الملك للدفاع عن القانون والحق.`;
+    
+    if (legalTopic === 'expropriation') {
+      whisperPrompt = `نزع الملكية من أجل المنفعة العامة، القانون رقم 7.81، المحكمة الإدارية، إيداع التعويض الاحتياطي، الإذن بالحيازة، نقل الملكية، لجنة التقييم، الوكيل القضائي للمملكة، الخبير القضائي.`;
+    }
+
+    const groqFormData = new FormData();
+    groqFormData.append('file', audioFile, 'recording.webm');
+    groqFormData.append('model', 'whisper-large-v3');
+    groqFormData.append('language', 'ar');
+    groqFormData.append('prompt', whisperPrompt);
+
+    const whisperRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: groqFormData,
+    });
+
+    if (!whisperRes.ok) {
+      const err = await whisperRes.json();
+      return NextResponse.json({ error: err.error?.message || 'Erreur Whisper' }, { status: whisperRes.status });
+    }
+
+    const whisperData = await whisperRes.json();
+    const rawText = whisperData.text;
+
+    // 2. Correction et structuration juridique via Llama 3.3 (température 0.0 pour un respect strict)
+    const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: `أنت مستشار قانوني محرر لأحكام وقرارات المحاكم الإدارية بالمملكة المغربية، متضلع في منصة "عدالة" وقانون المسطرة المدنية والقانون رقم 7.81 المتعلق بنزع الملكية.
+مهمتك: تصحيح النص المنسوخ من التسجيل الصوتي ليطابق تماماً الأسلوب القضائي المغربي (مثل: "باسم جلالة الملك وطبقاً للقانون"، "حكمت المحكمة علنياً وابتدائياً حضورياً").
+- صحح الأخطاء الصوتية واضبط المصطلحات (كالوكيل القضائي للمملكة، التعويض الاحتياطي، الإذن بالحيازة).
+- أرجع النص النهائي حصرياً باللغة العربية الفصحى القضائية.`
+          },
+          {
+            role: 'user',
+            content: rawText
+          }
+        ],
+        temperature: 0.0
+      }),
+    });
+
+    const chatData = await chatRes.json();
+    const correctedText = chatData.choices[0].message.content;
+
+    return NextResponse.json({ text: correctedText });
+
+  } catch (error) {
+    console.error('Erreur serveur:', error);
+    return NextResponse.json({ error: 'Erreur interne du serveur.' }, { status: 500 });
+  }
+}
