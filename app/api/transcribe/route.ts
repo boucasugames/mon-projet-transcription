@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const whisperData = await whisperRes.json();
     const rawText = whisperData.text;
 
-    // Utilisation du modèle visible dans votre Playground
+  // 2. Correction stricte sans AUCUNE invention ni ajout
     const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -47,21 +47,23 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-oss-120b', // <--- Modèle mis à jour selon votre capture
+        model: 'openai/gpt-oss-120b',
         messages: [
           {
             role: 'system',
-            content: `أنت مستشار قانوني محرر لأحكام وقرارات المحاكم الإدارية بالمملكة المغربية، متضلع في منصة "عدالة" وقانون المسطرة المدنية والقانون رقم 7.81 المتعلق بنزع الملكية.
-مهمتك: تصحيح النص المنسوخ من التسجيل الصوتي ليطابق تماماً الأسلوب القضائي المغربي (مثل: "باسم جلالة الملك وطبقاً للقانون"، "حكمت المحكمة علنياً وابتدائياً حضورياً").
-- صحح الأخطاء الصوتية واضبط المصطلحات (كالوكيل القضائي للمملكة، التعويض الاحتياطي، الإذن بالحيازة).
-- أرجع النص النهائي حصرياً باللغة العربية الفصحى القضائية.`
+            content: `أنت مدقق إملائي وقانوني بحت لتسجيلات المحاكم المغربية. 
+مهمتك الوحيدة هي تصحيح الأخطاء النطقية والإملائية فقط في النص المنسوخ من الصوت، وجعل الكلمات القانونية دقيقة (مثل نزع الملكية، علنيا حضوريا، الصائر، إلخ).
+قواعد صارمة جداً:
+1. ممنوع منعاً باتاً إضافة أي فقرات، أو وقائع، أو توقيعات، أو عناوين (مثل "الوقائع"، "المقرر"، "الحكم") لم تذكر في الصوت الأصلي.
+2. لا تحذف أي كلمة ذكرها المستخدم، ولا تقم بتأليف أسماء أو تواريخ أو مبالغ جديدة.
+3. التزم حرفياً بنص المتحدث مع تصحيح إملائه فقط ليكون جاهزاً للنسخ.`
           },
           {
             role: 'user',
             content: rawText
           }
         ],
-        temperature: 0.1
+        temperature: 0.0
       }),
     });
 
